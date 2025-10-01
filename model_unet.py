@@ -361,26 +361,32 @@ class DiscriminativeSubNetwork(nn.Module):
 # Main Anomaly Detection Model
 # ==============================================================================
 class AnomalyDetectionModel(nn.Module):
-    def __init__(self, recon_in, recon_out, recon_base, disc_in, disc_out, disc_base):
-        super().__init__()
-        # 這裡假設你的重建子網路和判別子網路是作為 AnomalyDetectionModel 的屬性
-        # 你需要根據你的實際 AnomalyDetectionModel 實現來調整這裡
-        self.reconstruction_subnet = ReconstructiveSubNetwork(in_channels=recon_in, out_channels=recon_out, base_c=recon_base)
-        self.discriminator_subnet = DiscriminativeSubNetwork(in_channels=disc_in, out_channels=disc_out, base_c=disc_base)
+
+    def __init__(self, recon_in, recon_out, recon_base, disc_in, disc_out,
+                 disc_base):
+        super(AnomalyDetectionModel, self).__init__()
+        self.reconstruction_subnet = ReconstructiveSubNetwork(
+            in_channels=recon_in,
+            out_channels=recon_out,
+            base_width=recon_base)
+        self.discriminator_subnet = DiscriminativeSubNetwork(
+            in_channels=disc_in,
+            out_channels=
+            disc_out,  # This should now be 1 due to the change in DiscriminativeSubNetwork
+            base_channels=disc_base)
 
     def forward(self, x, return_feats=False):
-        # 原始圖像通過重建網路
-        reconstructed_x = self.reconstruction_subnet(x)
-
-        # 重建圖像和原始圖像級聯
-        joined_in = torch.cat((reconstructed_x.detach(), x), dim=1) # 在推理時，reconstructed_x 不需要梯度
+        recon_image = self.reconstruction_subnet(x)
+        # disc_input = torch.cat((x, recon_image), dim=1)
+                # 重建圖像和原始圖像級聯
+        joined_in = torch.cat((recon_image.detach(), x), dim=1) # 在推理時，reconstructed_x 不需要梯度
 
         # 級聯圖像通過判別網路
-        segmentation_map = self.discriminator_subnet(joined_in)
+        seg_map = self.discriminator_subnet(joined_in)
 
         if return_feats:
             # 如果需要特徵，這裡你需要從 recon_subnet 和 disc_subnet 提取特徵
             # 這需要你的 ReconstructiveSubNetwork 和 DiscriminativeSubNetwork 有返回特徵的功能
             # 為了簡化，如果推理時不需要特徵，可以省略這部分
-            return reconstructed_x, segmentation_map, None # 或者返回實際特徵
-        return reconstructed_x, segmentation_map
+            return recon_image, seg_map, None # 或者返回實際特徵
+        return recon_image, seg_map
