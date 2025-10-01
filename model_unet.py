@@ -378,7 +378,7 @@ class AnomalyDetectionModel(nn.Module):
     def forward(self, x, return_feats=False):
         recon_image = self.reconstruction_subnet(x)
         # disc_input = torch.cat((x, recon_image), dim=1)
-                # 重建圖像和原始圖像級聯
+        # 重建圖像和原始圖像級聯
         joined_in = torch.cat((recon_image.detach(), x), dim=1) # 在推理時，reconstructed_x 不需要梯度
 
         # 級聯圖像通過判別網路
