@@ -152,7 +152,7 @@ def main(obj_names, args):
     SEG_CLASSES = 2  # 你的訓練日誌顯示 student_seg_map_val_raw shape: torch.Size([X, 2, 256, 256])
     RECON_BASE = 64  # <-- 假設與你訓練時的 recon_base 相同
     DISC_BASE = 64   # <-- 假設與你訓練時的 disc_base 相同
-    RESIZE_SHAPE = (256, 256) # 確保與訓練時保持一致
+    # RESIZE_SHAPE = (256, 256) # 確保與訓練時保持一致
 
     for obj_name in obj_names:
         print(f"▶️測試物件類別: {obj_name}")
@@ -214,7 +214,7 @@ def main(obj_names, args):
 
                 # --- 執行推理 ---
                 anomaly_map, binary_mask = run_inference(
-                    img_path, student_model, device, save_path_base, resize_shape=RESIZE_SHAPE)
+                    img_path, student_model, device, save_path_base)
         print(f"\n✅ 物件類別 {obj_name} 測試完成！")
     print("\n🎉 所有測試已完成！")
 
