@@ -69,83 +69,70 @@ def visualize_and_save(original_img_rgb, recon_img_rgb, anomaly_map_normalized, 
     original_img_bgr = cv2.cvtColor(original_img_rgb, cv2.COLOR_RGB2BGR)
     overlay = cv2.addWeighted(original_img_bgr, 0.6, heatmap_color, 0.4, 0)
 
-    # 將二值化遮罩轉為三通道，方便合併 (BGC 格式)
-    binary_mask_color = cv2.cvtColor(binary_mask, cv2.COLOR_GRAY2BGR)
+    # 將二值化遮罩轉為三通道，方便合併 (BGR 格式)
+    binary_mask_color = cv2.cvtColor(binary_mask, cv2.COLOR_GRAY2BGR) # 注意 binary_mask 已經是 [0, 255]
 
     # 將四張圖拼接成一張大圖 (原始圖 | 重建圖 | 疊加熱力圖 | 二值圖)
-    # 確保所有圖都是 BGR 格式
-    combined_img = np.hstack([original_img_bgr, recon_img_rgb, overlay, binary_mask_color])
+    # recon_img_rgb 也是 RGB，需要轉 BGR
+    combined_img = np.hstack([original_img_bgr, cv2.cvtColor(recon_img_rgb, cv2.COLOR_RGB2BGR), overlay, binary_mask_color])
 
     # 儲存合併後的影像
     cv2.imwrite(f"{save_path_base}_results.png", combined_img)
     print(f"✅ 結果已儲存至: {save_path_base}_results.png")
 
 
-def run_inference(img_path, model, device, save_path_base, resize_shape=(256, 256)):
-    """
-    對單張影像執行異常檢測推論。
+# --- 修改後的 run_inference 函數 ---
+def run_inference(img_path, student_model, device, save_path_base, img_dim=256):
+    # 1. 圖像預處理
+    transform = transforms.Compose([
+        transforms.Resize((img_dim, img_dim)),
+        transforms.ToTensor(),
+        # 如果你的訓練資料有正規化到 [-1, 1]，請在這裡加上 Normalize
+        # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    
+    # 載入原始圖像並轉為 RGB
+    image = Image.open(img_path).convert("RGB") 
+    
+    # 儲存原始圖像，以便 visualize_and_save 使用 (resize 到 img_dim x img_dim)
+    # 從 PIL Image 轉為 numpy array, 並且值域為 [0, 255]
+    original_img_resized_pil = image.resize((img_dim, img_dim), Image.LANCZOS)
+    original_img_rgb_np = np.array(original_img_resized_pil) # 值域 [0, 255]
 
-    Args:
-        img_path (str): 輸入影像的路徑。
-        model (nn.Module): 訓練好的學生模型。
-        device (str): 'cuda' 或 'cpu'。
-        save_path_base (str): 儲存結果的基礎路徑與檔名。
-        resize_shape (tuple): 圖像縮放的目標尺寸 (H, W)。
+    # 將圖像轉換為模型輸入張量
+    input_tensor = transform(image).unsqueeze(0).to(device) # 添加批次維度並移到GPU
 
-    Returns:
-        tuple: (anomaly_map, binary_mask)
-    """
-    # --- 1. 影像預處理 ---
-    # 定義與訓練時相同的轉換流程
-    # 注意：你的訓練集 MVTecDRAEMTrainDataset 中讀取後是 (H, W, C)，然後轉為 (C, H, W)
-    # 並歸一化到 0-1。這裡的推理也要保持一致。
-    
-    original_img_cv = cv2.imread(img_path)
-    if original_img_cv is None:
-        print(f"❌ 錯誤: 無法讀取影像 {img_path}")
-        return None, None
-    
-    # 將 BGR 轉為 RGB，因為你訓練時使用的 transform 預設是 RGB
-    original_img_rgb_display = cv2.cvtColor(original_img_cv, cv2.COLOR_BGR2RGB) 
-    
-    # 縮放影像
-    original_img_resized = cv2.resize(original_img_rgb_display, dsize=(resize_shape[1], resize_shape[0]))
-    
-    # 歸一化並轉換為 Tensor (C, H, W)
-    img_tensor = transforms.ToTensor()(original_img_resized).unsqueeze(0).to(device) # (1, 3, H, W)
-
-    # --- 2. 執行模型推論 ---
     with torch.no_grad():
-        # 由於你的模型期望 3 通道輸入，直接傳入 img_tensor
-        recon_image, seg_map_raw, _ = model(img_tensor, return_feats=True) # 修改：模型現在輸出seg_map_raw是2通道
+        # 2. 將圖像輸入到學生模型的重建子網路
+        student_recon_output_tensor = student_model.reconstruction_subnet(input_tensor)
 
-    # --- 3. 結果後處理 ---
-    # 將輸出的 logit 轉換為機率分佈 (如果你的模型輸出是 logits)
-    # 如果你的模型最後一層是 sigmoid，則可能不需要 softmax
-    # 但為了通用性，使用 softmax 處理 2 通道輸出是安全的
-    seg_map_softmax = torch.softmax(seg_map_raw, dim=1) 
-    
-    # 取出 "異常" 類別的機率圖 (假設類別 1 是異常，與訓練時的處理一致)
-    anomaly_map_tensor = seg_map_softmax[:, 1, :, :] # (B, H, W)
+        # 3. 將重建輸出和原始輸入圖像級聯
+        joined_input_for_discriminator = torch.cat((student_recon_output_tensor.detach(), input_tensor), dim=1)
 
-    # 將 Tensor 轉為 NumPy array 以便後續處理
-    anomaly_map = anomaly_map_tensor.squeeze().cpu().numpy() # (H, W)
-    
-    # 處理重建圖像
-    recon_image_np = recon_image.squeeze(0).permute(1, 2, 0).cpu().numpy() # (H, W, C)
-    recon_image_np = (recon_image_np * 255).astype(np.uint8) # 從 [0, 1] 轉回 [0, 255]
-    # recon_image_np 現在是 RGB 格式
+        # 4. 將級聯輸入傳遞給學生模型的判別子網路
+        student_seg_logits = student_model.discriminator_subnet(joined_input_for_discriminator)
 
-    # --- 4. 產生二值化遮罩 ---
-    # 設定一個閾值，將異常機率大於該值的像素標記為 1 (異常)
-    threshold = 0.5 # 可以根據 P-AUROC 的最佳閾值來調整
-    binary_mask = (anomaly_map > threshold).astype(np.uint8) * 255  # 轉為 0 或 255
+        # 5. 處理分割輸出 (Softmax)
+        student_seg_map_sm = torch.softmax(student_seg_logits, dim=1)
+        # 提取異常通道 (假設是通道 1)
+        anomaly_map_raw = student_seg_map_sm[0, 1, :, :].cpu().numpy() # 原始值域 [0, 1]
 
-    # --- 5. 可視化並儲存 ---
-    visualize_and_save(original_img_resized, recon_image_np, 
-                       (anomaly_map * 255).astype(np.uint8), binary_mask, save_path_base)
+        # 將重建圖像張量轉換為 NumPy 陣列，值域 [0, 255]
+        # (C, H, W) -> (H, W, C), 然後從 [0, 1] 縮放到 [0, 255] 並轉為 uint8
+        recon_image_np = (student_recon_output_tensor[0].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
 
-    return anomaly_map, binary_mask
+        # 將 anomaly_map_raw (值域 [0, 1]) 歸一化到 [0, 255]
+        anomaly_map_normalized_uint8 = (anomaly_map_raw * 255).astype(np.uint8)
+
+        # 如果需要二值化遮罩，可以設定一個閾值
+        threshold = 0.5 # 可以調整閾值
+        binary_mask = (anomaly_map_raw > threshold).astype(np.uint8) * 255 # 0或255
+
+        # 調用可視化函數
+        visualize_and_save(original_img_rgb_np, recon_image_np,
+                           anomaly_map_normalized_uint8, binary_mask, save_path_base)
+
+    return anomaly_map_raw, binary_mask # 返回原始的 float 異常圖和二值遮罩 (方便後續指標計算)
 
 
 # =======================
