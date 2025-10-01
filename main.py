@@ -125,7 +125,7 @@ def run_inference(img_path, student_model, device, save_path_base, img_dim=256):
         anomaly_map_normalized_uint8 = (anomaly_map_raw * 255).astype(np.uint8)
 
         # 如果需要二值化遮罩，可以設定一個閾值
-        threshold = 0.6 # 可以調整閾值
+        threshold = 0.5 # 可以調整閾值
         binary_mask = (anomaly_map_raw > threshold).astype(np.uint8) * 255 # 0或255
 
         # 調用可視化函數
