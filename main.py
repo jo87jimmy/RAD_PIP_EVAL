@@ -181,7 +181,7 @@ def main(obj_names, args):
 
         # 載入訓練好的學生模型權重
         # 建議載入基於 AUROC 保存的最佳模型
-        model_weights_path = os.path.join(args.checkpoint_dir, f"{obj_name}_best_auroc.pckl") # ⬅️ 確保這裡的路徑正確
+        model_weights_path = os.path.join(args.checkpoint_dir, f"{obj_name}.pckl") # ⬅️ 確保這裡的路徑正確
         if not os.path.exists(model_weights_path):
             print(f"❌ 錯誤: 未找到模型權重檔案: {model_weights_path}，請檢查路徑或訓練是否完成。")
             continue
